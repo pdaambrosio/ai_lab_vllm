@@ -73,13 +73,46 @@ go run ./cmd/bench -url http://localhost:11434/v1/chat/completions -model qwen2.
 Flags: `-url`, `-model`, `-n` (total requests), `-c` (concurrency),
 `-max-tokens`, `-prompt`.
 
-Note on interpreting results: with Ollama, raising `-c` may barely improve
-throughput while per-request latency climbs. This happens even on a GPU — by
-default Ollama serves few requests in parallel (`OLLAMA_NUM_PARALLEL`, limited
-further on low-VRAM cards), so extra concurrent requests just queue. vLLM's
-advantage (continuous batching) is precisely here: it batches concurrent
-requests together, so aggregate throughput scales without latency blowing up.
-Run the same bench against both to compare.
+Note on interpreting results: raising `-c` only increases aggregate throughput
+when the GPU has spare compute. Ollama by default also serves few requests in
+parallel (`OLLAMA_NUM_PARALLEL`, limited further on low-VRAM cards), so extra
+concurrent requests queue. vLLM's headline feature is continuous batching, which
+batches concurrent requests together — but that advantage only materializes on a
+GPU with compute headroom. On a small/entry GPU that is already compute-bound,
+concurrency stops helping (or even hurts) for **both** engines.
+
+### Measured results (GTX 1650 Mobile, 4 GB — Qwen2.5-0.5B)
+
+Same bench (`-n 24 -max-tokens 64`, identical prompt, warm cache):
+
+| Engine | c=1 req/s | c=1 tok/s | c=1 mean lat | c=8 req/s | c=8 tok/s | c=8 mean lat |
+|---|---|---|---|---|---|---|
+| Ollama | 0.62 | 25.6 | 1.60s | 0.71 | 28.2 | 9.96s |
+| vLLM   | 1.21 | 47.0 | 0.83s | 0.81 | 32.4 | 9.38s |
+
+Takeaways on this hardware:
+
+- **Single request: vLLM wins clearly** (~47 vs ~26 tok/s, ~2x lower latency) —
+  optimized kernels + prefix caching, even falling back to the Triton attention
+  backend (FlashAttention-2 needs compute capability >= 8.0; Turing is 7.5).
+- **Under concurrency the two roughly tie**, and neither scales up: the 4 GB
+  entry GPU saturates on compute, so batching adds contention without throughput.
+  vLLM's batching win needs a larger GPU to show.
+
+vLLM was run in Docker, tuned for the 4 GB Turing card (fp16, small context/batch):
+
+```bash
+docker run --rm --gpus all -p 8000:8000 --ipc=host \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  vllm/vllm-openai:latest \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --dtype half --max-model-len 1024 --max-num-seqs 16 \
+  --gpu-memory-utilization 0.75 --enforce-eager
+```
+
+(Requires `nvidia-container-toolkit`. On 4 GB, free the GPU first — e.g.
+`ollama stop qwen2.5:0.5b` — and keep `--gpu-memory-utilization` conservative to
+avoid CUDA OOM.)
 
 ## Tests
 
