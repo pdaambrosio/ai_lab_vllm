@@ -73,10 +73,13 @@ go run ./cmd/bench -url http://localhost:11434/v1/chat/completions -model qwen2.
 Flags: `-url`, `-model`, `-n` (total requests), `-c` (concurrency),
 `-max-tokens`, `-prompt`.
 
-Note on interpreting results: on CPU, raising `-c` barely improves throughput
-while per-request latency climbs — the backend just queues. vLLM's advantage
-(continuous batching) shows up under concurrency **on a GPU**, where throughput
-scales without latency blowing up. Run the same bench against both to compare.
+Note on interpreting results: with Ollama, raising `-c` may barely improve
+throughput while per-request latency climbs. This happens even on a GPU — by
+default Ollama serves few requests in parallel (`OLLAMA_NUM_PARALLEL`, limited
+further on low-VRAM cards), so extra concurrent requests just queue. vLLM's
+advantage (continuous batching) is precisely here: it batches concurrent
+requests together, so aggregate throughput scales without latency blowing up.
+Run the same bench against both to compare.
 
 ## Tests
 
