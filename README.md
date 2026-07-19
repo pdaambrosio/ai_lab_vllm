@@ -60,6 +60,24 @@ The `comando_sugerido` returned by the AI is **only displayed, never executed**.
 Running LLM output through `bash -c` would be command injection (e.g. `rm -rf`).
 Review and run it manually if appropriate.
 
+## Benchmark
+
+`cmd/bench` fires N chat-completion requests at a configurable concurrency level
+against any OpenAI-compatible endpoint and reports throughput, aggregate
+tokens/sec (from the `usage` field), and latency percentiles.
+
+```bash
+go run ./cmd/bench -url http://localhost:11434/v1/chat/completions -model qwen2.5:0.5b -n 40 -c 8
+```
+
+Flags: `-url`, `-model`, `-n` (total requests), `-c` (concurrency),
+`-max-tokens`, `-prompt`.
+
+Note on interpreting results: on CPU, raising `-c` barely improves throughput
+while per-request latency climbs — the backend just queues. vLLM's advantage
+(continuous batching) shows up under concurrency **on a GPU**, where throughput
+scales without latency blowing up. Run the same bench against both to compare.
+
 ## Tests
 
 ```bash
